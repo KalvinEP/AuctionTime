@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Auction Admin</title>
+<style>
+  body{margin:0;background:#f4f6f8;color:#1b2733;font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:820px;margin:0 auto;padding:16px}
+  h1{font-size:22px} h2{font-size:16px;margin:0 0 10px}
+  .box{background:#fff;border:1px solid #dde3e9;border-radius:12px;padding:16px;margin-bottom:14px}
+  label{display:block;font-size:13px;color:#5b6b7a;margin:10px 0 4px}
+  input,textarea{width:100%;padding:9px;border:1px solid #c9d2db;border-radius:8px;font:inherit}
+  textarea{min-height:120px;font-family:ui-monospace,Menlo,monospace;font-size:13px}
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  button{padding:9px 14px;border:0;border-radius:8px;background:#1f7a4d;color:#fff;font-weight:600;cursor:pointer;margin-top:12px;margin-right:6px}
+  button.alt{background:#e8edf2;color:#1b2733} button.danger{background:#b83b2e}
+  table{width:100%;border-collapse:collapse;font-size:14px} td,th{text-align:left;padding:6px 4px;border-top:1px solid #e6ebf0}
+  .chk{display:flex;align-items:center;gap:8px;margin-top:14px} .chk input{width:auto}
+  .msg{color:#1f7a4d;font-size:14px;min-height:20px;margin-top:6px} .msg.bad{color:#b83b2e}
+  .big{font-size:26px;font-weight:800}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Auction admin</h1>
+
+  <div class="box">
+    <label for="key">Admin key</label>
+    <input id="key" type="password" placeholder="The ADMIN_KEY you set on the server">
+    <button id="load">Load</button>
+    <div class="msg" id="loadMsg"></div>
+  </div>
+
+  <div id="panel" style="display:none">
+    <div class="box">
+      <h2>Live</h2>
+      <div>Status: <b id="st"></b> &nbsp;·&nbsp; Total pool: <span class="big" id="pool"></span></div>
+      <button class="alt" id="refresh">Refresh</button>
+      <button class="alt" id="csv">Download results (CSV)</button>
+    </div>
+
+    <div class="box">
+      <h2>Settings</h2>
+      <label for="players">Players (one per line, in the order you want them shown)</label>
+      <textarea id="players" placeholder="Player 1&#10;Player 2&#10;..."></textarea>
+      <div class="cols">
+        <div><label for="closeAt">Bidding closes at</label><input id="closeAt" type="datetime-local"></div>
+        <div><label for="startPrice">Opening bid</label><input id="startPrice" type="number" min="1"></div>
+        <div><label for="increment">Minimum raise</label><input id="increment" type="number" min="1"></div>
+        <div><label for="currency">Currency symbol</label><input id="currency" maxlength="4"></div>
+      </div>
+      <div class="chk"><input id="open" type="checkbox"><label for="open" style="margin:0;color:inherit;font-size:15px">Bidding is open (tick to start; it always stops at the close time)</label></div>
+      <button id="saveCfg">Save settings</button>
+      <div class="msg" id="cfgMsg"></div>
+    </div>
+
+    <div class="box">
+      <h2>Bidders</h2>
+      <label for="bidText">Add bidders — one per line: Name, phone, PIN (leave PIN out and one is generated)</label>
+      <textarea id="bidText" placeholder="Sam, 082 123 4567&#10;Lerato, 0831234567, 7421"></textarea>
+      <button id="addBid">Add / update</button>
+      <button class="alt" id="copyInv">Copy invite messages</button>
+      <div class="msg" id="bidMsg"></div>
+      <table id="bidTable"></table>
+    </div>
+
+    <div class="box">
+      <h2>Danger zone</h2>
+      <button class="danger" id="reset">Clear all bids (e.g. after a test run)</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let KEY = sessionStorage.getItem('akey') || '', DATA = null;
+$('#key').value = KEY;
+
+async function api(path, body){
+  const r = await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','x-admin-key':KEY},body:body?JSON.stringify(body):undefined});
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error||'Error');
+  return j;
+}
+const say = (id,m,bad) => { const e=$(id); e.textContent=m; e.className='msg'+(bad?' bad':''); };
+const localInput = ms => { const d=new Date(ms - new Date(ms).getTimezoneOffset()*60000); return d.toISOString().slice(0,16); };
+
+async function load(){
+  KEY = $('#key').value; sessionStorage.setItem('akey',KEY);
+  try{
+    DATA = await api('/api/admin/data');
+    $('#panel').style.display='block'; say('#loadMsg','Loaded.');
+    $('#st').textContent = DATA.status;
+    $('#pool').textContent = DATA.currency+' '+DATA.view.pool.toLocaleString('en-ZA');
+    if(document.activeElement!==$('#players')) $('#players').value = DATA.players.map(p=>p.name).join('\n');
+    $('#closeAt').value = DATA.closeAt ? localInput(DATA.closeAt) : '';
+    $('#startPrice').value = DATA.startPrice; $('#increment').value = DATA.increment; $('#currency').value = DATA.currency;
+    $('#open').checked = DATA.open;
+    drawBidders(DATA.bidders);
+  }catch(e){ say('#loadMsg',e.message,true); $('#panel').style.display='none'; }
+}
+function drawBidders(list){
+  $('#bidTable').innerHTML = '<tr><th>Name</th><th>Phone (last 9 digits)</th><th>PIN</th><th></th></tr>' +
+    list.map(b=>`<tr><td>${esc(b.name)}</td><td>${b.phone}</td><td>${b.pin}</td><td><a href="#" data-p="${b.phone}">remove</a></td></tr>`).join('');
+  document.querySelectorAll('#bidTable a').forEach(a=>a.onclick=async e=>{ e.preventDefault(); if(!confirm('Remove this bidder?'))return; const j=await api('/api/admin/bidders/delete',{phone:a.dataset.p}); DATA.bidders=j.bidders; drawBidders(j.bidders); });
+}
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+$('#load').onclick = load;
+$('#refresh').onclick = load;
+$('#saveCfg').onclick = async () => {
+  try{
+    const body = {
+      closeAt: $('#closeAt').value ? new Date($('#closeAt').value).toISOString() : null,
+      startPrice: $('#startPrice').value, increment: $('#increment').value,
+      currency: $('#currency').value, open: $('#open').checked
+    };
+    const names = $('#players').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    if(JSON.stringify(names) !== JSON.stringify(DATA.players.map(p=>p.name))) body.players = names;
+    await api('/api/admin/config', body);
+    say('#cfgMsg','Saved.'); load();
+  }catch(e){ say('#cfgMsg',e.message,true); }
+};
+$('#addBid').onclick = async () => {
+  try{ const j = await api('/api/admin/bidders',{text:$('#bidText').value}); DATA.bidders=j.bidders; drawBidders(j.bidders); $('#bidText').value=''; say('#bidMsg','Saved.'); }
+  catch(e){ say('#bidMsg',e.message,true); }
+};
+$('#copyInv').onclick = async () => {
+  const link = location.origin + '/';
+  const txt = DATA.bidders.map(b=>`${b.name}: ${link}\nPhone: ${b.phone.length===9?'0'+b.phone:b.phone}  PIN: ${b.pin}`).join('\n\n');
+  try{ await navigator.clipboard.writeText(txt); say('#bidMsg','Invite messages copied.'); }catch{ prompt('Copy these:',txt); }
+};
+$('#reset').onclick = async () => {
+  if(!confirm('This deletes every bid. Continue?')) return;
+  await api('/api/admin/reset',{}); say('#cfgMsg','All bids cleared.'); load();
+};
+$('#csv').onclick = async () => {
+  const r = await fetch('/api/admin/results.csv',{headers:{'x-admin-key':KEY}});
+  const b = await r.blob(), a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download='auction-results.csv'; a.click();
+};
+if(KEY) load();
+</script>
+</body>
+</html>
