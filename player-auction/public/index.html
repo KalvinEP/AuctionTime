@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Player Auction</title>
+<style>
+  :root{--bg:#0f1720;--card:#18232f;--line:#2a3a4a;--text:#eef3f8;--mut:#8fa3b5;--accent:#2ecc71;--warn:#f5b041;--bad:#e74c3c;--mine:#1f4d3a}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:1100px;margin:0 auto;padding:16px}
+  h1{font-size:20px;margin:0}
+  .login{max-width:340px;margin:12vh auto;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px}
+  .login h1{margin-bottom:16px}
+  label{display:block;font-size:13px;color:var(--mut);margin:12px 0 4px}
+  input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0f1720;color:var(--text);font-size:16px}
+  button{padding:12px 14px;border:0;border-radius:10px;background:var(--accent);color:#06210f;font-weight:700;font-size:15px;cursor:pointer}
+  button:disabled{background:#33414f;color:#7d8ea0;cursor:not-allowed}
+  .login button{width:100%;margin-top:18px}
+  .err{color:var(--bad);font-size:14px;margin-top:10px;min-height:18px}
+  .top{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:12px;margin-bottom:14px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+  .stat .k{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
+  .stat .v{font-size:30px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}
+  .stat.pool .v{color:var(--accent);font-size:38px}
+  .banner{padding:10px 14px;border-radius:10px;margin-bottom:14px;font-weight:600;text-align:center}
+  .banner.open{background:#173a28;color:#7ff0ad}
+  .banner.pending{background:#3b3216;color:var(--warn)}
+  .banner.closed{background:#40201d;color:#ff9b90}
+  .who{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;color:var(--mut);font-size:14px}
+  .who a{color:var(--mut);cursor:pointer;text-decoration:underline}
+  .main{display:grid;grid-template-columns:1fr 280px;gap:14px;align-items:start}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .card.mine{background:var(--mine);border-color:var(--accent)}
+  .card.flash{animation:flash 1.2s}
+  @keyframes flash{0%{box-shadow:0 0 0 3px var(--warn)}100%{box-shadow:0 0 0 0 transparent}}
+  .card .n{font-weight:700;margin-bottom:6px}
+  .card .a{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+  .card .l{font-size:13px;color:var(--mut);min-height:18px;margin-bottom:8px}
+  .row{display:flex;gap:6px}
+  .row input{padding:9px;font-size:15px;min-width:0}
+  .row button{padding:9px 12px;white-space:nowrap}
+  .feed{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;position:sticky;top:12px}
+  .feed h2{font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px}
+  .feed div{font-size:14px;padding:6px 0;border-top:1px solid var(--line)}
+  .feed div:first-of-type{border-top:0}
+  #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#33150f;color:#ffb4aa;border:1px solid var(--bad);padding:10px 16px;border-radius:10px;display:none;z-index:9;max-width:90vw}
+  @media(max-width:800px){.main{grid-template-columns:1fr}.feed{position:static}.top{grid-template-columns:1fr 1fr}.stat.pool{grid-column:1/-1}}
+</style>
+</head>
+<body>
+
+<div id="loginView" class="login" style="display:none">
+  <h1>Player Auction</h1>
+  <label for="phone">Phone number</label>
+  <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="082 123 4567">
+  <label for="pin">PIN</label>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="4-digit PIN">
+  <button id="loginBtn">Enter</button>
+  <div class="err" id="loginErr"></div>
+</div>
+
+<div id="appView" class="wrap" style="display:none">
+  <div class="who"><span>Logged in as <b id="me"></b></span><a id="logout">Log out</a></div>
+  <div id="banner" class="banner"></div>
+  <div class="top">
+    <div class="stat pool"><div class="k">Total pool</div><div class="v" id="pool">0</div></div>
+    <div class="stat"><div class="k">Your leading bids</div><div class="v" id="mine">0</div></div>
+    <div class="stat"><div class="k" id="clockLabel">Closes in</div><div class="v" id="clock">--</div></div>
+  </div>
+  <div class="main">
+    <div class="grid" id="grid"></div>
+    <div class="feed"><h2>Latest bids</h2><div id="feed"></div></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let token = localStorage.getItem('tok'), S = null, off = 0, es = null;
+const money = n => (S ? S.currency : 'R') + ' ' + Number(n).toLocaleString('en-ZA');
+
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.style.display='block'; clearTimeout(toast.h); toast.h=setTimeout(()=>t.style.display='none',3500); }
+function show(loggedIn){ $('#loginView').style.display = loggedIn?'none':'block'; $('#appView').style.display = loggedIn?'block':'none'; }
+function logout(){ localStorage.removeItem('tok'); token=null; if(es){es.close();es=null;} S=null; $('#grid').innerHTML=''; show(false); }
+
+async function api(path, body){
+  const r = await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','x-token':token||''},body:body?JSON.stringify(body):undefined});
+  const j = await r.json().catch(()=>({}));
+  if(r.status===401 && token){ logout(); }
+  if(!r.ok) throw new Error(j.error||'Something went wrong');
+  return j;
+}
+
+$('#loginBtn').onclick = async () => {
+  $('#loginErr').textContent='';
+  try{
+    const j = await api('/api/login',{phone:$('#phone').value,pin:$('#pin').value});
+    token=j.token; localStorage.setItem('tok',token); start();
+  }catch(e){ $('#loginErr').textContent=e.message; }
+};
+$('#pin').addEventListener('keydown',e=>{ if(e.key==='Enter') $('#loginBtn').click(); });
+$('#logout').onclick = logout;
+
+function start(){
+  show(true);
+  if(es) es.close();
+  es = new EventSource('/api/events?token='+encodeURIComponent(token));
+  es.onmessage = e => { S = JSON.parse(e.data); off = S.serverTime - Date.now(); render(); };
+  es.onerror = () => { setTimeout(async()=>{ try{ await api('/api/state'); }catch{} },2000); };
+}
+
+function build(p){
+  const d = document.createElement('div'); d.className='card'; d.id='p'+p.id; d.dataset.amt='0';
+  d.innerHTML = `<div class="n"></div><div class="a"></div><div class="l"></div>
+    <div class="row"><input type="number" inputmode="numeric" min="0" step="1"><button>Bid</button></div>`;
+  d.querySelector('.n').textContent = p.name;
+  d.querySelector('button').onclick = async () => {
+    const inp = d.querySelector('input');
+    const pl = S.players.find(x=>x.id===p.id);
+    const amount = inp.value ? Number(inp.value) : pl.min;
+    try{ await api('/api/bid',{playerId:p.id,amount}); inp.value=''; }catch(e){ toast(e.message); }
+  };
+  d.querySelector('input').addEventListener('keydown',e=>{ if(e.key==='Enter') d.querySelector('button').click(); });
+  return d;
+}
+
+function render(){
+  $('#me').textContent = S.me || '';
+  $('#pool').textContent = money(S.pool);
+  $('#mine').textContent = money(S.mine);
+  const b = $('#banner');
+  b.className = 'banner '+S.status;
+  b.textContent = S.status==='open' ? 'Bidding is open' : S.status==='closed' ? 'Bidding has closed — final results below' : 'Bidding has not opened yet';
+  const grid = $('#grid');
+  for(const p of S.players){
+    let c = document.getElementById('p'+p.id);
+    if(!c){ c = build(p); grid.appendChild(c); }
+    const changed = Number(c.dataset.amt) !== p.amount;
+    c.querySelector('.a').textContent = p.amount ? money(p.amount) : '—';
+    c.querySelector('.l').textContent = p.leader ? (p.mine ? 'You are leading' : 'Leader: '+p.leader) : 'No bids yet';
+    c.classList.toggle('mine', p.mine);
+    const inp = c.querySelector('input'), btn = c.querySelector('button');
+    inp.placeholder = 'min '+p.min;
+    const canBid = S.status==='open' && !p.mine;
+    inp.disabled = btn.disabled = !canBid;
+    btn.textContent = p.mine ? 'Leading' : 'Bid';
+    if(changed && Number(c.dataset.amt)!==0 || (changed && p.amount)){ c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash'); }
+    c.dataset.amt = p.amount;
+  }
+  $('#feed').innerHTML = S.recent.length ? '' : '<div style="color:var(--mut)">Nothing yet</div>';
+  for(const r of S.recent){
+    const d = document.createElement('div');
+    d.textContent = `${r.who} bid ${money(r.amount)} on ${r.player}`;
+    $('#feed').appendChild(d);
+  }
+  tick();
+}
+
+function fmt(ms){
+  const s = Math.max(0, Math.floor(ms/1000)), h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = s%60;
+  const two = n => String(n).padStart(2,'0');
+  return (h>=24 ? Math.floor(h/24)+'d ' + two(h%24) : two(h)) + ':' + two(m) + ':' + two(x);
+}
+function tick(){
+  if(!S) return;
+  if(!S.closeAt){ $('#clock').textContent='--'; return; }
+  const left = S.closeAt - (Date.now()+off);
+  if(left<=0){
+    $('#clockLabel').textContent='Closed'; $('#clock').textContent='00:00:00';
+    if(S.status==='open'){ S.status='closed'; render(); }
+  } else {
+    $('#clockLabel').textContent='Closes in'; $('#clock').textContent=fmt(left);
+  }
+}
+setInterval(tick,1000);
+
+if(token){ api('/api/state').then(start).catch(()=>show(false)); } else show(false);
+</script>
+</body>
+</html>
