@@ -9,6 +9,8 @@ if (!ADMIN_KEY) { console.error('Set the ADMIN_KEY environment variable first.')
 
 let db = { players: [], bidders: [], bids: [], sessions: {}, closeAt: null, open: false, increment: 10, startPrice: 10, currency: 'R' };
 try { db = Object.assign(db, JSON.parse(fs.readFileSync(DATA, 'utf8'))); } catch {}
+const IMG_DIR = process.env.IMG_DIR || path.join(path.dirname(DATA), 'images');
+fs.mkdirSync(IMG_DIR, { recursive: true });
 const save = () => { fs.writeFileSync(DATA + '.tmp', JSON.stringify(db)); fs.renameSync(DATA + '.tmp', DATA); };
 
 const now = () => Date.now();
@@ -29,7 +31,7 @@ function view(phone) {
   const players = db.players.map(p => {
     const b = last[p.id], amount = b ? b.amount : 0, isMine = !!b && b.phone === phone;
     pool += amount; if (isMine) mine += amount;
-    return { id: p.id, name: p.name, amount, bids: count[p.id] || 0, leader: b ? nameOf(b.phone) : null, mine: isMine,
+    return { id: p.id, name: p.name, img: p.img ? '/img/' + p.img : null, amount, bids: count[p.id] || 0, leader: b ? nameOf(b.phone) : null, mine: isMine,
              min: b ? amount + db.increment : Math.max(db.startPrice, 1) };
   });
   return {
@@ -54,6 +56,20 @@ const readBody = req => new Promise((ok, no) => {
   let s = ''; req.on('data', c => { s += c; if (s.length > 1e6) { req.destroy(); no(); } });
   req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch { no(); } });
 });
+const readRaw = (req, max) => new Promise((ok, no) => {
+  const parts = []; let n = 0;
+  req.on('data', c => { n += c.length; if (n > max) { req.destroy(); no(new Error('too big')); } else parts.push(c); });
+  req.on('end', () => ok(Buffer.concat(parts)));
+  req.on('error', no);
+});
+function sniff(buf) {
+  if (buf.length > 12 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return ['jpg', 'image/jpeg'];
+  if (buf.length > 12 && buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))) return ['png', 'image/png'];
+  if (buf.length > 12 && buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') return ['webp', 'image/webp'];
+  return null;
+}
+const IMG_TYPES = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+const removeImg = name => { if (name && /^[\w.-]+$/.test(name)) fs.unlink(path.join(IMG_DIR, name), () => {}); };
 const phoneFor = (req, url) => db.sessions[req.headers['x-token'] || url.searchParams.get('token') || ''] || null;
 const isAdmin = (req, url) => {
   const k = String(req.headers['x-admin-key'] || url.searchParams.get('key') || '');
@@ -79,6 +95,17 @@ http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && (p === '/' || p === '/index.html')) return serveStatic(res, 'index.html');
     if (req.method === 'GET' && p === '/admin') return serveStatic(res, 'admin.html');
+
+    if (req.method === 'GET' && p.startsWith('/img/')) {
+      if (!phoneFor(req, url) && !isAdmin(req, url)) { res.writeHead(401); return res.end('Login required'); }
+      const name = path.basename(p), ext = path.extname(name).slice(1);
+      if (!IMG_TYPES[ext] || !/^[\w.-]+$/.test(name)) { res.writeHead(404); return res.end('Not found'); }
+      return fs.readFile(path.join(IMG_DIR, name), (e, d) => {
+        if (e) { res.writeHead(404); return res.end('Not found'); }
+        res.writeHead(200, { 'Content-Type': IMG_TYPES[ext], 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
+        res.end(d);
+      });
+    }
 
     // --- bidder API ---
     if (p === '/api/login' && req.method === 'POST') {
@@ -132,7 +159,14 @@ http.createServer(async (req, res) => {
         const b = await readBody(req);
         if (Array.isArray(b.players)) {
           if (db.bids.length) return send(res, 400, { error: 'Bids already exist. Reset bids before changing the player list.' });
-          db.players = b.players.map(n => String(n).trim()).filter(Boolean).map((name, i) => ({ id: i + 1, name }));
+          const old = db.players, names = b.players.map(n => String(n).trim()).filter(Boolean);
+          const pool = old.slice();
+          db.players = names.map((name, i) => {
+            const k = pool.findIndex(o => o.name === name);
+            const img = k >= 0 ? pool.splice(k, 1)[0].img : undefined;
+            return { id: i + 1, name, img };
+          });
+          pool.forEach(o => removeImg(o.img));
         }
         if ('closeAt' in b) db.closeAt = b.closeAt ? new Date(b.closeAt).getTime() : null;
         if ('open' in b) db.open = !!b.open;
@@ -159,6 +193,22 @@ http.createServer(async (req, res) => {
         db.bidders = db.bidders.filter(x => x.phone !== norm(b.phone));
         for (const t of Object.keys(db.sessions)) if (db.sessions[t] === norm(b.phone)) delete db.sessions[t];
         save(); return send(res, 200, { bidders: db.bidders });
+      }
+      if (p === '/api/admin/image' && req.method === 'POST') {
+        const pl = db.players.find(x => x.id === Number(url.searchParams.get('player')));
+        if (!pl) return send(res, 400, { error: 'Unknown player.' });
+        let buf; try { buf = await readRaw(req, 4 * 1024 * 1024); } catch { return send(res, 413, { error: 'Image too large (4 MB max).' }); }
+        const t = sniff(buf); if (!t) return send(res, 400, { error: 'Use a JPG, PNG or WebP image.' });
+        const file = `${pl.id}-${crypto.randomBytes(6).toString('hex')}.${t[0]}`;
+        fs.writeFileSync(path.join(IMG_DIR, file), buf);
+        removeImg(pl.img); pl.img = file; save(); broadcast();
+        return send(res, 200, { ok: true, img: '/img/' + file });
+      }
+      if (p === '/api/admin/image/delete' && req.method === 'POST') {
+        const b = await readBody(req), pl = db.players.find(x => x.id === Number(b.playerId));
+        if (!pl) return send(res, 400, { error: 'Unknown player.' });
+        removeImg(pl.img); pl.img = undefined; save(); broadcast();
+        return send(res, 200, { ok: true });
       }
       if (p === '/api/admin/reset' && req.method === 'POST') { db.bids = []; save(); broadcast(); return send(res, 200, { ok: true }); }
       if (p === '/api/admin/results.csv' && req.method === 'GET') {
