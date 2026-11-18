@@ -19,6 +19,12 @@
   .chk{display:flex;align-items:center;gap:8px;margin-top:14px} .chk input{width:auto}
   .msg{color:#1f7a4d;font-size:14px;min-height:20px;margin-top:6px} .msg.bad{color:#b83b2e}
   .big{font-size:26px;font-weight:800}
+  .lots{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin-top:10px}
+  .lot{border:1px solid #dde3e9;border-radius:10px;padding:8px;font-size:13px}
+  .lot .ph{height:100px;border-radius:8px;background:#eef2f5 center/cover no-repeat;display:flex;align-items:center;justify-content:center;color:#8a99a8;margin-bottom:6px}
+  .lot b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lot button{padding:5px 8px;font-size:12px;margin:6px 4px 0 0}
+  .lot input[type=file]{display:none}
 </style>
 </head>
 <body>
@@ -53,6 +59,13 @@
       <div class="chk"><input id="open" type="checkbox"><label for="open" style="margin:0;color:inherit;font-size:15px">Bidding is open (tick to start; it always stops at the close time)</label></div>
       <button id="saveCfg">Save settings</button>
       <div class="msg" id="cfgMsg"></div>
+    </div>
+
+    <div class="box">
+      <h2>Lot photos</h2>
+      <div style="color:#5b6b7a;font-size:13px">Save the player list first, then add a photo to each lot. Photos are shrunk automatically before upload.</div>
+      <div class="lots" id="lots"></div>
+      <div class="msg" id="imgMsg"></div>
     </div>
 
     <div class="box">
@@ -97,13 +110,54 @@ async function load(){
     $('#closeAt').value = DATA.closeAt ? localInput(DATA.closeAt) : '';
     $('#startPrice').value = DATA.startPrice; $('#increment').value = DATA.increment; $('#currency').value = DATA.currency;
     $('#open').checked = DATA.open;
-    drawBidders(DATA.bidders);
+    drawBidders(DATA.bidders); drawLots();
   }catch(e){ say('#loadMsg',e.message,true); $('#panel').style.display='none'; }
 }
 function drawBidders(list){
   $('#bidTable').innerHTML = '<tr><th>Name</th><th>Phone (last 9 digits)</th><th>PIN</th><th></th></tr>' +
     list.map(b=>`<tr><td>${esc(b.name)}</td><td>${b.phone}</td><td>${b.pin}</td><td><a href="#" data-p="${b.phone}">remove</a></td></tr>`).join('');
   document.querySelectorAll('#bidTable a').forEach(a=>a.onclick=async e=>{ e.preventDefault(); if(!confirm('Remove this bidder?'))return; const j=await api('/api/admin/bidders/delete',{phone:a.dataset.p}); DATA.bidders=j.bidders; drawBidders(j.bidders); });
+}
+function drawLots(){
+  const box = $('#lots'); box.innerHTML = '';
+  if(!DATA.players.length){ box.textContent = 'No players yet.'; return; }
+  for(const p of DATA.players){
+    const d = document.createElement('div'); d.className = 'lot';
+    d.innerHTML = '<div class="ph">no photo</div><b></b><label><button type="button" class="alt">Choose photo</button><input type="file" accept="image/*"></label>';
+    d.querySelector('b').textContent = p.name;
+    const ph = d.querySelector('.ph');
+    if(p.img){ ph.textContent=''; ph.style.backgroundImage = `url('/img/${p.img}?key=${encodeURIComponent(KEY)}')`;
+      const rm = document.createElement('button'); rm.type='button'; rm.className='alt danger'; rm.textContent='Remove';
+      rm.onclick = async () => { try{ await api('/api/admin/image/delete',{playerId:p.id}); load(); }catch(e){ say('#imgMsg',e.message,true); } };
+      d.appendChild(rm); }
+    const inp = d.querySelector('input'), btn = d.querySelector('button');
+    btn.onclick = () => inp.click();
+    inp.onchange = async () => { if(inp.files[0]) await upload(p.id, p.name, inp.files[0]); };
+    box.appendChild(d);
+  }
+}
+function shrink(file){
+  return new Promise((ok,no)=>{
+    const u = URL.createObjectURL(file), im = new Image();
+    im.onload = () => {
+      const k = Math.min(1, 900/Math.max(im.width, im.height)), c = document.createElement('canvas');
+      c.width = Math.round(im.width*k); c.height = Math.round(im.height*k);
+      const x = c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height); x.drawImage(im,0,0,c.width,c.height);
+      URL.revokeObjectURL(u); c.toBlob(b => b ? ok(b) : no(new Error('Could not read that image')), 'image/jpeg', 0.85);
+    };
+    im.onerror = () => { URL.revokeObjectURL(u); no(new Error('Could not read that image')); };
+    im.src = u;
+  });
+}
+async function upload(id, name, file){
+  say('#imgMsg','Uploading '+name+'…');
+  try{
+    const blob = await shrink(file);
+    const r = await fetch('/api/admin/image?player='+id,{method:'POST',headers:{'x-admin-key':KEY,'Content-Type':'application/octet-stream'},body:blob});
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(j.error||'Upload failed');
+    say('#imgMsg','Photo saved for '+name+'.'); load();
+  }catch(e){ say('#imgMsg',e.message,true); }
 }
 const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 

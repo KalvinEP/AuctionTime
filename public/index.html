@@ -30,23 +30,34 @@
   .who{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;color:var(--mut);font-size:14px}
   .who a{color:var(--mut);cursor:pointer;text-decoration:underline}
   .main{display:grid;grid-template-columns:1fr 280px;gap:14px;align-items:start}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+  .grid{align-items:start;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
   .card.mine{background:var(--mine);border-color:var(--accent)}
   .card.flash{animation:flash 1.2s}
   @keyframes flash{0%{box-shadow:0 0 0 3px var(--warn)}100%{box-shadow:0 0 0 0 transparent}}
   .card .n{font-weight:700;margin-bottom:6px}
+  .card .ph{display:none;width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:8px;margin-bottom:8px;background:#0f1720;cursor:zoom-in}
+  .card.hasimg .ph{display:block}
+  .win{background:var(--card);border:1px solid var(--accent);border-radius:14px;padding:12px;margin-bottom:12px}
+  .win h2{font-size:13px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px}
+  .win .it{display:flex;justify-content:space-between;gap:8px;font-size:14px;padding:5px 0;border-top:1px solid var(--line);cursor:pointer}
+  .win .it:first-of-type{border-top:0}
+  .win .it b{font-variant-numeric:tabular-nums}
+  .win .none{color:var(--mut);font-size:14px}
+  #lb{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;z-index:10;cursor:zoom-out}
+  #lb img{max-width:94vw;max-height:90vh;border-radius:10px}
   .card .a{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
   .card .l{font-size:13px;color:var(--mut);min-height:18px;margin-bottom:8px}
   .row{display:flex;gap:6px}
   .row input{padding:9px;font-size:15px;min-width:0}
   .row button{padding:9px 12px;white-space:nowrap}
-  .feed{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;position:sticky;top:12px}
+  .side{position:sticky;top:12px}
+  .feed{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
   .feed h2{font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px}
   .feed div{font-size:14px;padding:6px 0;border-top:1px solid var(--line)}
   .feed div:first-of-type{border-top:0}
   #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#33150f;color:#ffb4aa;border:1px solid var(--bad);padding:10px 16px;border-radius:10px;display:none;z-index:9;max-width:90vw}
-  @media(max-width:800px){.main{grid-template-columns:1fr}.feed{position:static}.top{grid-template-columns:1fr 1fr}.stat.pool{grid-column:1/-1}}
+  @media(max-width:800px){.main{display:flex;flex-direction:column;align-items:stretch}.side{display:contents}.win{order:-1;margin-bottom:0}.feed{order:2}.top{grid-template-columns:1fr 1fr}.stat.pool{grid-column:1/-1}}
 </style>
 </head>
 <body>
@@ -71,10 +82,14 @@
   </div>
   <div class="main">
     <div class="grid" id="grid"></div>
-    <div class="feed"><h2>Latest bids</h2><div id="feed"></div></div>
+    <div class="side">
+      <div class="win"><h2 id="winH">You're winning</h2><div id="win"></div></div>
+      <div class="feed"><h2>Latest bids</h2><div id="feed"></div></div>
+    </div>
   </div>
 </div>
 <div id="toast"></div>
+<div id="lb"><img alt=""></div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -83,7 +98,7 @@ const money = n => (S ? S.currency : 'R') + ' ' + Number(n).toLocaleString('en-Z
 
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.style.display='block'; clearTimeout(toast.h); toast.h=setTimeout(()=>t.style.display='none',3500); }
 function show(loggedIn){ $('#loginView').style.display = loggedIn?'none':'block'; $('#appView').style.display = loggedIn?'block':'none'; }
-function logout(){ localStorage.removeItem('tok'); token=null; if(es){es.close();es=null;} S=null; $('#grid').innerHTML=''; show(false); }
+function logout(){ localStorage.removeItem('tok'); token=null; if(es){es.close();es=null;} S=null; prevMine=null; $('#grid').innerHTML=''; show(false); }
 
 async function api(path, body){
   const r = await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','x-token':token||''},body:body?JSON.stringify(body):undefined});
@@ -113,9 +128,10 @@ function start(){
 
 function build(p){
   const d = document.createElement('div'); d.className='card'; d.id='p'+p.id; d.dataset.amt='0';
-  d.innerHTML = `<div class="n"></div><div class="a"></div><div class="l"></div>
+  d.innerHTML = `<img class="ph" loading="lazy" alt=""><div class="n"></div><div class="a"></div><div class="l"></div>
     <div class="row"><input type="number" inputmode="numeric" min="0" step="1"><button>Bid</button></div>`;
   d.querySelector('.n').textContent = p.name;
+  d.querySelector('.ph').onclick = e => { $('#lb img').src = e.target.src; $('#lb').style.display = 'flex'; };
   d.querySelector('button').onclick = async () => {
     const inp = d.querySelector('input');
     const pl = S.players.find(x=>x.id===p.id);
@@ -126,7 +142,15 @@ function build(p){
   return d;
 }
 
+const imgSrc = u => u + '?token=' + encodeURIComponent(token);
+let prevMine = null;
 function render(){
+  const nowMine = new Set(S.players.filter(p=>p.mine).map(p=>p.id));
+  if(prevMine){
+    const lost = S.players.filter(p=>prevMine.has(p.id) && !nowMine.has(p.id));
+    if(lost.length) toast('Outbid on ' + lost.map(p=>p.name).join(', '));
+  }
+  prevMine = nowMine;
   $('#me').textContent = S.me || '';
   $('#pool').textContent = money(S.pool);
   $('#mine').textContent = money(S.mine);
@@ -141,6 +165,9 @@ function render(){
     c.querySelector('.a').textContent = p.amount ? money(p.amount) : '—';
     c.querySelector('.l').textContent = p.leader ? (p.mine ? 'You are leading' : 'Leader: '+p.leader) : 'No bids yet';
     c.classList.toggle('mine', p.mine);
+    const im = c.querySelector('.ph');
+    if(p.img){ const want = imgSrc(p.img); if(im.getAttribute('src')!==want) im.src = want; c.classList.add('hasimg'); }
+    else { im.removeAttribute('src'); c.classList.remove('hasimg'); }
     const inp = c.querySelector('input'), btn = c.querySelector('button');
     inp.placeholder = 'min '+p.min;
     const canBid = S.status==='open' && !p.mine;
@@ -148,6 +175,18 @@ function render(){
     btn.textContent = p.mine ? 'Leading' : 'Bid';
     if(changed && Number(c.dataset.amt)!==0 || (changed && p.amount)){ c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash'); }
     c.dataset.amt = p.amount;
+  }
+  const mine = S.players.filter(p=>p.mine), w = $('#win');
+  $('#winH').textContent = (S.status==='closed' ? "You won" : "You're winning") + ' (' + mine.length + ')';
+  w.innerHTML = '';
+  if(!mine.length){ w.innerHTML = '<div class="none">Nothing yet — place a bid.</div>'; }
+  for(const p of mine){
+    const r = document.createElement('div'); r.className='it';
+    const n = document.createElement('span'); n.textContent = p.name;
+    const a = document.createElement('b'); a.textContent = money(p.amount);
+    r.append(n,a);
+    r.onclick = () => document.getElementById('p'+p.id).scrollIntoView({behavior:'smooth',block:'center'});
+    w.appendChild(r);
   }
   $('#feed').innerHTML = S.recent.length ? '' : '<div style="color:var(--mut)">Nothing yet</div>';
   for(const r of S.recent){
@@ -175,6 +214,7 @@ function tick(){
   }
 }
 setInterval(tick,1000);
+$('#lb').onclick = () => { $('#lb').style.display='none'; };
 
 if(token){ api('/api/state').then(start).catch(()=>show(false)); } else show(false);
 </script>
