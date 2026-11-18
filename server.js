@@ -35,6 +35,7 @@ function view(phone) {
              min: b ? amount + db.increment : Math.max(db.startPrice, 1) };
   });
   return {
+    logo: db.logo ? '/logo?v=' + db.logo : null,
     status: status(), closeAt: db.closeAt, serverTime: now(), currency: db.currency, increment: db.increment,
     pool, mine, me: nameOf(phone), players,
     recent: db.bids.slice(-10).reverse().map(b => ({ player: playerName(b.pid), amount: b.amount, who: nameOf(b.phone), t: b.t }))
@@ -106,6 +107,17 @@ http.createServer(async (req, res) => {
         res.end(d);
       });
     }
+
+    if (req.method === 'GET' && p === '/logo') {
+      const name = db.logo || '', ext = path.extname(name).slice(1);
+      if (!IMG_TYPES[ext] || !/^[\w.-]+$/.test(name)) { res.writeHead(404); return res.end('Not found'); }
+      return fs.readFile(path.join(IMG_DIR, name), (e, d) => {
+        if (e) { res.writeHead(404); return res.end('Not found'); }
+        res.writeHead(200, { 'Content-Type': IMG_TYPES[ext], 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
+        res.end(d);
+      });
+    }
+    if (req.method === 'GET' && p === '/api/public') return send(res, 200, { logo: db.logo ? '/logo?v=' + db.logo : null });
 
     // --- bidder API ---
     if (p === '/api/login' && req.method === 'POST') {
@@ -208,6 +220,18 @@ http.createServer(async (req, res) => {
         const b = await readBody(req), pl = db.players.find(x => x.id === Number(b.playerId));
         if (!pl) return send(res, 400, { error: 'Unknown player.' });
         removeImg(pl.img); pl.img = undefined; save(); broadcast();
+        return send(res, 200, { ok: true });
+      }
+      if (p === '/api/admin/logo' && req.method === 'POST') {
+        let buf; try { buf = await readRaw(req, 4 * 1024 * 1024); } catch { return send(res, 413, { error: 'Image too large (4 MB max).' }); }
+        const t = sniff(buf); if (!t) return send(res, 400, { error: 'Use a JPG, PNG or WebP image.' });
+        const file = `logo-${crypto.randomBytes(6).toString('hex')}.${t[0]}`;
+        fs.writeFileSync(path.join(IMG_DIR, file), buf);
+        removeImg(db.logo); db.logo = file; save(); broadcast();
+        return send(res, 200, { ok: true });
+      }
+      if (p === '/api/admin/logo/delete' && req.method === 'POST') {
+        removeImg(db.logo); db.logo = undefined; save(); broadcast();
         return send(res, 200, { ok: true });
       }
       if (p === '/api/admin/reset' && req.method === 'POST') { db.bids = []; save(); broadcast(); return send(res, 200, { ok: true }); }

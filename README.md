@@ -12,12 +12,13 @@ Needs Node 18 or newer. No packages to install.
 
 ## Set up an auction (in /admin)
 1. Paste the 32 player names (one per line).
-2. Save the list, then add a photo to each lot under "Lot photos" (any phone or camera photo works; it's shrunk automatically).
-3. Set the closing time, opening bid and minimum raise.
-4. Add bidders as `Name, phone, PIN` (leave the PIN out to get one generated). Use "Copy invite messages" and send each person their link and PIN on WhatsApp.
-5. Do a test: tick "Bidding is open", bid from two phones, then use "Clear all bids".
-6. Tick "Bidding is open" when you want to start. It stops at the close time whatever the tick box says.
-7. After closing, "Download results (CSV)" gives each player's winning bid, the winner, and the total pool.
+2. (Optional) Upload your logo under "Logo". It appears on the login page and at the top of the bidding page.
+3. Save the list, then add a photo to each lot under "Lot photos" (any phone or camera photo works; it's shrunk automatically).
+4. Set the closing time, opening bid and minimum raise.
+5. Add bidders as `Name, phone, PIN` (leave the PIN out to get one generated). Use "Copy invite messages" and send each person their link and PIN on WhatsApp.
+6. Do a test: tick "Bidding is open", bid from two phones, then use "Clear all bids".
+7. Tick "Bidding is open" when you want to start. It stops at the close time whatever the tick box says.
+8. After closing, "Download results (CSV)" gives each player's winning bid, the winner, and the total pool.
 
 ## What bidders see
 - Photo on each lot (tap to enlarge)

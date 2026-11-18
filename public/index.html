@@ -12,6 +12,9 @@
   h1{font-size:20px;margin:0}
   .login{max-width:340px;margin:12vh auto;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px}
   .login h1{margin-bottom:16px}
+  .logo{display:none;margin:0 auto 14px;max-height:80px;max-width:100%}
+  .logo.on{display:block}
+  .login .logo{max-height:90px}
   label{display:block;font-size:13px;color:var(--mut);margin:12px 0 4px}
   input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0f1720;color:var(--text);font-size:16px}
   button{padding:12px 14px;border:0;border-radius:10px;background:var(--accent);color:#06210f;font-weight:700;font-size:15px;cursor:pointer}
@@ -63,6 +66,7 @@
 <body>
 
 <div id="loginView" class="login" style="display:none">
+  <img class="logo" id="logoL" alt="">
   <h1>Player Auction</h1>
   <label for="phone">Phone number</label>
   <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="082 123 4567">
@@ -73,6 +77,7 @@
 </div>
 
 <div id="appView" class="wrap" style="display:none">
+  <img class="logo" id="logoA" alt="">
   <div class="who"><span>Logged in as <b id="me"></b></span><a id="logout">Log out</a></div>
   <div id="banner" class="banner"></div>
   <div class="top">
@@ -97,6 +102,8 @@ let token = localStorage.getItem('tok'), S = null, off = 0, es = null;
 const money = n => (S ? S.currency : 'R') + ' ' + Number(n).toLocaleString('en-ZA');
 
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.style.display='block'; clearTimeout(toast.h); toast.h=setTimeout(()=>t.style.display='none',3500); }
+function setLogo(u){ for(const id of ['#logoL','#logoA']){ const e=$(id); if(u){ if(e.getAttribute('src')!==u) e.src=u; e.classList.add('on'); } else { e.removeAttribute('src'); e.classList.remove('on'); } } }
+fetch('/api/public').then(r=>r.json()).then(j=>setLogo(j.logo)).catch(()=>{});
 function show(loggedIn){ $('#loginView').style.display = loggedIn?'none':'block'; $('#appView').style.display = loggedIn?'block':'none'; }
 function logout(){ localStorage.removeItem('tok'); token=null; if(es){es.close();es=null;} S=null; prevMine=null; $('#grid').innerHTML=''; show(false); }
 
@@ -145,6 +152,7 @@ function build(p){
 const imgSrc = u => u + '?token=' + encodeURIComponent(token);
 let prevMine = null;
 function render(){
+  setLogo(S.logo);
   const nowMine = new Set(S.players.filter(p=>p.mine).map(p=>p.id));
   if(prevMine){
     const lost = S.players.filter(p=>prevMine.has(p.id) && !nowMine.has(p.id));

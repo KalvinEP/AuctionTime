@@ -62,6 +62,15 @@
     </div>
 
     <div class="box">
+      <h2>Logo</h2>
+      <div style="color:#5b6b7a;font-size:13px">Shown at the top of the login page and the bidding page. A PNG with a transparent background looks best.</div>
+      <div id="logoPrev" style="margin-top:10px;min-height:40px;background:#1b2733;border-radius:8px;padding:10px;text-align:center;color:#8a99a8"></div>
+      <label><button type="button" class="alt" id="logoBtn">Choose logo</button><input type="file" id="logoFile" accept="image/*" style="display:none"></label>
+      <button type="button" class="alt danger" id="logoRm" style="display:none">Remove logo</button>
+      <div class="msg" id="logoMsg"></div>
+    </div>
+
+    <div class="box">
       <h2>Lot photos</h2>
       <div style="color:#5b6b7a;font-size:13px">Save the player list first, then add a photo to each lot. Photos are shrunk automatically before upload.</div>
       <div class="lots" id="lots"></div>
@@ -110,7 +119,7 @@ async function load(){
     $('#closeAt').value = DATA.closeAt ? localInput(DATA.closeAt) : '';
     $('#startPrice').value = DATA.startPrice; $('#increment').value = DATA.increment; $('#currency').value = DATA.currency;
     $('#open').checked = DATA.open;
-    drawBidders(DATA.bidders); drawLots();
+    drawBidders(DATA.bidders); drawLots(); drawLogo();
   }catch(e){ say('#loadMsg',e.message,true); $('#panel').style.display='none'; }
 }
 function drawBidders(list){
@@ -118,6 +127,24 @@ function drawBidders(list){
     list.map(b=>`<tr><td>${esc(b.name)}</td><td>${b.phone}</td><td>${b.pin}</td><td><a href="#" data-p="${b.phone}">remove</a></td></tr>`).join('');
   document.querySelectorAll('#bidTable a').forEach(a=>a.onclick=async e=>{ e.preventDefault(); if(!confirm('Remove this bidder?'))return; const j=await api('/api/admin/bidders/delete',{phone:a.dataset.p}); DATA.bidders=j.bidders; drawBidders(j.bidders); });
 }
+function drawLogo(){
+  const pv = $('#logoPrev');
+  if(DATA.logo){ pv.innerHTML=''; const im=document.createElement('img'); im.src='/logo?v='+encodeURIComponent(DATA.logo); im.style.cssText='max-height:90px;max-width:100%'; pv.appendChild(im); }
+  else pv.textContent='No logo yet';
+  $('#logoRm').style.display = DATA.logo ? 'inline-block' : 'none';
+}
+$('#logoBtn').onclick = () => $('#logoFile').click();
+$('#logoFile').onchange = async e => {
+  const f = e.target.files[0]; if(!f) return;
+  say('#logoMsg','Uploading…');
+  try{
+    const blob = await shrink(f, 600, 'image/png');
+    const r = await fetch('/api/admin/logo',{method:'POST',headers:{'x-admin-key':KEY,'Content-Type':'application/octet-stream'},body:blob});
+    const j = await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||'Upload failed');
+    say('#logoMsg','Logo saved.'); e.target.value=''; load();
+  }catch(err){ say('#logoMsg',err.message,true); }
+};
+$('#logoRm').onclick = async () => { try{ await api('/api/admin/logo/delete',{}); say('#logoMsg','Logo removed.'); load(); }catch(e){ say('#logoMsg',e.message,true); } };
 function drawLots(){
   const box = $('#lots'); box.innerHTML = '';
   if(!DATA.players.length){ box.textContent = 'No players yet.'; return; }
@@ -136,14 +163,14 @@ function drawLots(){
     box.appendChild(d);
   }
 }
-function shrink(file){
+function shrink(file, max = 900, type = 'image/jpeg'){
   return new Promise((ok,no)=>{
     const u = URL.createObjectURL(file), im = new Image();
     im.onload = () => {
-      const k = Math.min(1, 900/Math.max(im.width, im.height)), c = document.createElement('canvas');
+      const k = Math.min(1, max/Math.max(im.width, im.height)), c = document.createElement('canvas');
       c.width = Math.round(im.width*k); c.height = Math.round(im.height*k);
-      const x = c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height); x.drawImage(im,0,0,c.width,c.height);
-      URL.revokeObjectURL(u); c.toBlob(b => b ? ok(b) : no(new Error('Could not read that image')), 'image/jpeg', 0.85);
+      const x = c.getContext('2d'); if(type==='image/jpeg'){ x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height); } x.drawImage(im,0,0,c.width,c.height);
+      URL.revokeObjectURL(u); c.toBlob(b => b ? ok(b) : no(new Error('Could not read that image')), type, 0.85);
     };
     im.onerror = () => { URL.revokeObjectURL(u); no(new Error('Could not read that image')); };
     im.src = u;
